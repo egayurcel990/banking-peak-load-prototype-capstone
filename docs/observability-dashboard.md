@@ -6,11 +6,25 @@ Dashboard Grafana `Banking Peak Load Monitor` dipakai untuk demo kondisi baselin
 
 ```bash
 docker compose --profile optimized --profile observability up -d --build
+nix develop -c k6 run scripts/load-test/mixed.js
 ```
 
 - Grafana: <http://localhost:3000> (`admin` / `admin`)
 - Prometheus: <http://localhost:9090>
 - API metrics: <http://localhost:8080/metrics>
+
+Gunakan `scripts/load-test/mixed.js` untuk demo utama dashboard karena traffic-nya mengikuti PRD: 70% read dan 30% write. Script ini mengisi panel read latency, write latency, Redis cache hit ratio, queue depth, throughput, error rate, dan dependency health secara bersamaan.
+
+## Script Load Test
+
+| Script | Deskripsi |
+| --- | --- |
+| `mixed.js` | Workload utama untuk observability: 70% read / 30% write, balance inquiry, transaction status inquiry, dan create transaction. Cocok untuk demo baseline vs optimized. |
+| `optimized.js` | Write-only ramping load untuk menguji async queue, rate limiter, dan write latency pada konfigurasi optimized. |
+| `rampup.js` | Write-only ramp bertahap untuk mencari titik jenuh throughput. |
+| `spike.js` | Write-only spike singkat untuk melihat proteksi seperti HTTP 429 dan 503. |
+| `sustained.js` | Write-only constant high load untuk stabilitas jangka panjang. |
+| `full.js` | Gabungan write-only ramp-up, spike, dan sustained untuk stress rehearsal yang lebih berat. |
 
 ## Stat Panel / Gauge
 

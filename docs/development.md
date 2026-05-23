@@ -70,7 +70,7 @@ docker compose --profile optimized up -d
 docker compose --profile optimized --profile observability up -d
 
 # 5. Run load test
-k6 run scripts/load-test/baseline.js
+k6 run scripts/load-test/mixed.js
 ```
 
 ## Kubernetes Local Run
@@ -195,8 +195,27 @@ go test ./...
 go test -tags=integration ./...
 
 # Load tests
-k6 run scripts/load-test/baseline.js
+k6 run scripts/load-test/mixed.js
 k6 run scripts/load-test/optimized.js
+```
+
+### Load Test Scripts
+
+| Script | Description | Best fit |
+|--------|-------------|----------|
+| `scripts/load-test/mixed.js` | Primary realistic workload: 70% reads and 30% writes. Read traffic covers balance inquiry and transaction status inquiry, with a hot-read pool so Redis cache behavior shows up in metrics. | Baseline vs optimized comparison, Grafana dashboard validation, SLO demo. |
+| `scripts/load-test/optimized.js` | Write-only ramping arrival-rate test for `POST /api/v1/transactions`, peaking at 1000 req/s. | Async queue and write-path latency demo. |
+| `scripts/load-test/rampup.js` | Write-only gradual ramp with configurable rate step and stage duration. | Finding the approximate throughput ceiling. |
+| `scripts/load-test/spike.js` | Write-only short spike designed to trigger protection layers. | Rate limiter and circuit breaker behavior, including HTTP 429/503. |
+| `scripts/load-test/sustained.js` | Write-only constant high load, default 800 req/s for 30 minutes. | Long-duration stability of PgBouncer, RabbitMQ, and DB writes. |
+| `scripts/load-test/full.js` | Write-only ramp-up, spike, and sustained phases in one run. | A heavier stress rehearsal after the focused scripts pass. |
+
+Common overrides:
+
+```bash
+RATE=300 DURATION=5m k6 run scripts/load-test/mixed.js
+BASE_URL=http://localhost:8080 RATE=300 DURATION=5m k6 run scripts/load-test/mixed.js
+nix develop -c k6 run scripts/load-test/mixed.js
 ```
 
 ## Dummy Data
@@ -207,5 +226,6 @@ Seed script generates:
 - Realistic distribution of transaction statuses (completed, pending, failed)
 
 ```bash
-go run ./seeds/main.go --accounts=100000 --transactions=1000000
+go run ./cmd/seeds/main.go
+nix develop -c go run ./cmd/seeds/main.go
 ```

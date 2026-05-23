@@ -50,7 +50,7 @@ down:
 	docker compose --profile optimized down
 
 load-test:
-	k6 run scripts/load-test/optimized.js
+	k6 run scripts/load-test/mixed.js
 
 logs:
 	docker compose logs -f
@@ -88,4 +88,4 @@ k8s-seed:
 	DB_PRIMARY_DSN=$(K8S_DB_DSN) go run ./cmd/seeds/main.go
 
 k8s-load-test:
-	BASE_URL=$(K8S_BASE_URL) k6 run scripts/load-test/optimized.js
+	BASE_URL=$(K8S_BASE_URL) k6 run scripts/load-test/mixed.js

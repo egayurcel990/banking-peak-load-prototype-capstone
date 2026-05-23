@@ -115,18 +115,35 @@ make seed
 # --- Baseline (API + PostgreSQL only) ---
 cp .env.baseline.example .env
 docker compose up -d
-k6 run scripts/load-test/baseline.js
+k6 run scripts/load-test/mixed.js
 
 # --- Optimized (+ Redis, RabbitMQ, read replica) ---
 cp .env.optimized.example .env
 docker compose --profile optimized up -d
-k6 run scripts/load-test/optimized.js
+k6 run scripts/load-test/mixed.js
 
 # --- Full stack (+ Prometheus, Grafana) ---
 docker compose --profile optimized --profile observability up -d
 # Grafana: http://localhost:3000
 # Prometheus: http://localhost:9090
 ```
+
+When using the Nix dev shell, prefix k6 commands with `nix develop -c`, for example:
+
+```bash
+nix develop -c k6 run scripts/load-test/mixed.js
+```
+
+## Load Test Scripts
+
+| Script | Traffic model | Use it for |
+|--------|---------------|------------|
+| `scripts/load-test/mixed.js` | Realistic 70% read / 30% write workload. Reads are split between balance inquiry and transaction status inquiry, with a hot-read pool to exercise Redis cache hits. | Main baseline vs optimized demo, Grafana validation, SLO checks for read p95 < 500ms and write p95 < 2s. |
+| `scripts/load-test/optimized.js` | Write-only ramping load up to 1000 req/s against `POST /api/v1/transactions`. | Focused optimized write-path test for async queue, rate limiter, and write latency. |
+| `scripts/load-test/rampup.js` | Write-only gradual ramp, configurable by `INITIAL_RATE`, `RATE_STEP`, `STAGE_DURATION`, and `MAX_STAGES`. | Finding the saturation point and watching when latency/errors start rising. |
+| `scripts/load-test/spike.js` | Write-only short spike with increasing arrival rate. | Verifying protection behavior such as HTTP 429 rate limiting and HTTP 503 circuit breaking. |
+| `scripts/load-test/sustained.js` | Write-only constant high load, default 800 req/s for 30 minutes. | Long-running stability checks for PgBouncer, RabbitMQ workers, and DB write pressure. |
+| `scripts/load-test/full.js` | Write-only combined ramp-up, spike, and sustained phases. | End-to-end stress rehearsal when you want all write-pressure phases in one run. |
 
 ## Makefile Commands
 
@@ -138,6 +155,9 @@ docker compose --profile optimized --profile observability up -d
 | `make test` | Run unit tests (`go test -v ./...`) |
 | `make build` | Compile binary to `bin/app` |
 | `make seed` | Seed 100K accounts + 1M transactions |
+| `make up` | Start the baseline Docker Compose stack |
+| `make up-optimized` | Start the optimized Docker Compose stack |
+| `make load-test` | Run the mixed k6 workload against `http://localhost:8080` |
 | `make k8s-up` | Apply Kubernetes manifests under `deployments/k8s/` |
 | `make k8s-status` | Show Kubernetes pods, services, and HPA status |
 | `make k8s-logs` | Follow logs from the `banking-app` deployment |
@@ -146,7 +166,7 @@ docker compose --profile optimized --profile observability up -d
 | `make k8s-port-forward-prometheus` | Forward Prometheus to `http://localhost:9090` |
 | `make k8s-port-forward-grafana` | Forward Grafana to `http://localhost:3000` |
 | `make k8s-seed` | Seed data through the forwarded PostgreSQL service |
-| `make k8s-load-test` | Run the optimized k6 script against the forwarded app |
+| `make k8s-load-test` | Run the mixed k6 workload against the forwarded app |
 | `make k8s-down` | Delete the Kubernetes stack |
 
 ## Docker Compose Profiles
@@ -256,7 +276,7 @@ banking-peak-load-prototype/
 ├── migrations/                # SQL migrations
 ├── seeds/                     # Dummy data generation
 ├── scripts/
-│   ├── load-test/             # k6 scripts (baseline.js, optimized.js)
+│   ├── load-test/             # k6 scripts (mixed, write-only, spike, sustained)
 │   └── setup/                 # Helper scripts (seed, wait-for-db)
 ├── deployments/
 │   ├── docker/                # Dockerfiles
@@ -292,6 +312,6 @@ go test ./...
 go test -tags=integration ./...
 
 # Load tests
-k6 run scripts/load-test/baseline.js
+k6 run scripts/load-test/mixed.js
 k6 run scripts/load-test/optimized.js
 ```

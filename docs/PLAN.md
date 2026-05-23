@@ -1,9 +1,9 @@
 # Implementation Plan
 
 ## Phase 1 — Baseline
-- [x] Seed data generator (`seeds/main.go`) — 100K accounts, 1M transactions
+- [x] Seed data generator (`cmd/seeds/main.go`) — 100K accounts, 1M transactions
 - [x] Real balance validation + atomic debit/credit on transaction creation
-- [ ] k6 baseline load test script (`scripts/load-test/baseline.js`)
+- [x] k6 realistic mixed workload (`scripts/load-test/mixed.js`) for baseline and optimized comparison
 
 ## Phase 2 — Optimizations
 - [x] Redis cache-aside for GET /accounts/:id/balance and GET /transactions/:id/status
@@ -16,4 +16,4 @@
 ## Phase 3 — Observability
 - [x] Prometheus scrape config (`deployments/prometheus/prometheus.yml`)
 - [x] Grafana dashboard provisioning (TPS, p95 latency, error rate, cache hit rate)
-- [ ] k6 optimized load test script (`scripts/load-test/optimized.js`)
+- [x] k6 write-path and stress scripts (`optimized.js`, `rampup.js`, `spike.js`, `sustained.js`, `full.js`)
