@@ -4,6 +4,8 @@
 
 A university prototype demonstrating defense-in-depth scalability for banking peak load — simulating CIMB Niaga's problem of 1M transactions/hour causing crashes, 10s latency, and cost spikes.
 
+yurcel was here
+
 ## Problem Statement
 
 A major bank experiences system crashes during peak load. Root causes: no load shedding or backpressure, database connection exhaustion, heavy queries without caching, and reactive (not proactive) scaling. This prototype shows how layered protection mechanisms bring the system from >20% error rate and >5s p95 latency down to <0.5% errors and <2s p95 write latency.
