@@ -1,6 +1,14 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Counter, Gauge, Rate, Trend } from 'k6/metrics';
+import {
+	WRITE_EXPECTED_STATUSES,
+	formatStatusList,
+	isBusinessRejectedStatus,
+	isExpectedWriteStatus,
+	isProtectedStatus,
+	writeResponseCallback,
+} from './status.js';
 
 // =========================
 // Custom Metrics
@@ -8,6 +16,8 @@ import { Counter, Gauge, Rate, Trend } from 'k6/metrics';
 export const successRate = new Rate('success_rate');
 export const failedRequests = new Counter('failed_requests');
 export const transactionLatency = new Trend('transaction_latency');
+export const protectedRequests = new Counter('protected_requests');
+export const businessRejectedRequests = new Counter('business_rejected_requests');
 
 export const rampUpIntervalRequests = new Counter('ramp_up_interval_requests');
 export const rampUpIntervalTarget = new Gauge('ramp_up_interval_target');
@@ -161,13 +171,21 @@ function buildTransactionPayload() {
 	});
 }
 
-function recordBaseMetrics(res, ok) {
-	successRate.add(res.status === 201 || res.status === 202);
+function recordBaseMetrics(res, expectedStatus) {
+	successRate.add(expectedStatus);
 	transactionLatency.add(res.timings.duration);
 
-	if (!ok) {
+	if (isProtectedStatus(res.status)) {
+		protectedRequests.add(1);
+	}
+
+	if (isBusinessRejectedStatus(res.status)) {
+		businessRejectedRequests.add(1);
+	}
+
+	if (!expectedStatus) {
 		failedRequests.add(1);
-		console.error(`FAILED | status=${res.status} body=${res.body}`);
+		console.error(`UNEXPECTED STATUS | status=${res.status} body=${res.body}`);
 	}
 }
 
@@ -183,6 +201,7 @@ export function ramp_up_test() {
 	const params = {
 		headers: { 'Content-Type': 'application/json' },
 		timeout: '5s',
+		responseCallback: writeResponseCallback,
 	};
 
 	const res = http.post(`${BASE_URL}/api/v1/transactions`, payload, params);
@@ -190,13 +209,13 @@ export function ramp_up_test() {
 	rampUpIntervalRequests.add(1, { interval: String(interval) });
 	rampUpIntervalTarget.add(target, { interval: String(interval) });
 
-	const ok = check(res, {
-		'status is 201, 202, 429, or 503': (r) =>
-			r.status === 201 || r.status === 202 || r.status === 429 || r.status === 503,
+	const expectedStatus = isExpectedWriteStatus(res.status);
+	check(res, {
+		[`status is ${formatStatusList(WRITE_EXPECTED_STATUSES)}`]: (r) => isExpectedWriteStatus(r.status),
 		'response time < 2s': (r) => r.timings.duration < 2000,
 	});
 
-	recordBaseMetrics(res, ok);
+	recordBaseMetrics(res, expectedStatus);
 	sleep(Math.random() * 0.05);
 }
 
@@ -209,6 +228,7 @@ export function spike_test() {
 	const params = {
 		headers: { 'Content-Type': 'application/json' },
 		timeout: '5s',
+		responseCallback: writeResponseCallback,
 	};
 
 	const res = http.post(`${BASE_URL}/api/v1/transactions`, payload, params);
@@ -216,13 +236,13 @@ export function spike_test() {
 	spikeIntervalRequests.add(1, { interval: String(interval) });
 	spikeIntervalTarget.add(target, { interval: String(interval) });
 
-	const ok = check(res, {
-		'status is 201, 202, 429, or 503': (r) =>
-			r.status === 201 || r.status === 202 || r.status === 429 || r.status === 503,
+	const expectedStatus = isExpectedWriteStatus(res.status);
+	check(res, {
+		[`status is ${formatStatusList(WRITE_EXPECTED_STATUSES)}`]: (r) => isExpectedWriteStatus(r.status),
 		'response time < 2s': (r) => r.timings.duration < 2000,
 	});
 
-	recordBaseMetrics(res, ok);
+	recordBaseMetrics(res, expectedStatus);
 	sleep(Math.random() * 0.05);
 }
 
@@ -234,6 +254,7 @@ export function sustained_load_test() {
 	const params = {
 		headers: { 'Content-Type': 'application/json' },
 		timeout: '5s',
+		responseCallback: writeResponseCallback,
 	};
 
 	const res = http.post(`${BASE_URL}/api/v1/transactions`, payload, params);
@@ -241,12 +262,12 @@ export function sustained_load_test() {
 	sustainedIntervalRequests.add(1, { interval: String(interval) });
 	sustainedIntervalTarget.add(SUSTAINED_RATE, { interval: String(interval) });
 
-	const ok = check(res, {
-		'status is 201, 202, 429, or 503': (r) =>
-			r.status === 201 || r.status === 202 || r.status === 429 || r.status === 503,
+	const expectedStatus = isExpectedWriteStatus(res.status);
+	check(res, {
+		[`status is ${formatStatusList(WRITE_EXPECTED_STATUSES)}`]: (r) => isExpectedWriteStatus(r.status),
 		'response time < 2s': (r) => r.timings.duration < 2000,
 	});
 
-	recordBaseMetrics(res, ok);
+	recordBaseMetrics(res, expectedStatus);
 	sleep(Math.random() * 0.05);
 }

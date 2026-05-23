@@ -1,6 +1,14 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Counter, Gauge, Rate, Trend } from 'k6/metrics';
+import {
+	WRITE_EXPECTED_STATUSES,
+	formatStatusList,
+	isBusinessRejectedStatus,
+	isExpectedWriteStatus,
+	isProtectedStatus,
+	writeResponseCallback,
+} from './status.js';
 
 // =========================
 // Custom Metrics
@@ -9,6 +17,7 @@ export const successRate = new Rate('success_rate');
 export const failedRequests = new Counter('failed_requests');
 export const transactionLatency = new Trend('transaction_latency');
 export const protectedRequests = new Counter('protected_requests');
+export const businessRejectedRequests = new Counter('business_rejected_requests');
 export const spikeIntervalRequests = new Counter('spike_interval_requests');
 export const spikeIntervalTarget = new Gauge('spike_interval_target');
 
@@ -97,6 +106,7 @@ export default function () {
 	const params = {
 		headers: { 'Content-Type': 'application/json' },
 		timeout: '5s',
+		responseCallback: writeResponseCallback,
 	};
 
 	const res = http.post(`${BASE_URL}/api/v1/transactions`, payload, params);
@@ -104,24 +114,26 @@ export default function () {
 	spikeIntervalRequests.add(1, { interval: String(spikeInterval) });
 	spikeIntervalTarget.add(spikeTarget, { interval: String(spikeInterval) });
 
-	const ok = check(res, {
-		'status is 201, 202, 429, or 503': (r) =>
-			r.status === 201 || r.status === 202 || r.status === 429 || r.status === 503,
+	const expectedStatus = isExpectedWriteStatus(res.status);
+	check(res, {
+		[`status is ${formatStatusList(WRITE_EXPECTED_STATUSES)}`]: (r) => isExpectedWriteStatus(r.status),
 		'response time < 2s': (r) => r.timings.duration < 2000,
 	});
 
-	const protectedResponse = res.status === 429 || res.status === 503;
-
-	successRate.add(res.status === 201 || res.status === 202);
+	successRate.add(expectedStatus);
 	transactionLatency.add(res.timings.duration);
 
-	if (protectedResponse) {
+	if (isProtectedStatus(res.status)) {
 		protectedRequests.add(1);
 	}
 
-	if (!ok) {
+	if (isBusinessRejectedStatus(res.status)) {
+		businessRejectedRequests.add(1);
+	}
+
+	if (!expectedStatus) {
 		failedRequests.add(1);
-		console.error(`FAILED | status=${res.status} body=${res.body}`);
+		console.error(`UNEXPECTED STATUS | status=${res.status} body=${res.body}`);
 	}
 
 	sleep(Math.random() * 0.05);

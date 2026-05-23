@@ -1,6 +1,17 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
+import {
+	READ_EXPECTED_STATUSES,
+	WRITE_EXPECTED_STATUSES,
+	formatStatusList,
+	isBusinessRejectedStatus,
+	isExpectedReadStatus,
+	isExpectedWriteStatus,
+	isProtectedStatus,
+	readResponseCallback,
+	writeResponseCallback,
+} from './status.js';
 
 export const successRate = new Rate('success_rate');
 export const readSuccessRate = new Rate('read_success_rate');
@@ -10,6 +21,8 @@ export const writeLatency = new Trend('write_latency');
 export const readRequests = new Counter('read_requests');
 export const writeRequests = new Counter('write_requests');
 export const failedRequests = new Counter('failed_requests');
+export const protectedRequests = new Counter('protected_requests');
+export const businessRejectedRequests = new Counter('business_rejected_requests');
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 const RATE = positiveIntFromEnv('RATE', 300);
@@ -104,36 +117,52 @@ function buildTransactionPayload() {
 }
 
 function recordRead(endpoint, res) {
-	const ok = check(res, {
-		[`${endpoint} status is 200`]: (r) => r.status === 200,
+	const expectedStatus = isExpectedReadStatus(res.status);
+	check(res, {
+		[`${endpoint} status is ${formatStatusList(READ_EXPECTED_STATUSES)}`]: (r) =>
+			isExpectedReadStatus(r.status),
 		[`${endpoint} response time < 500ms`]: (r) => r.timings.duration < 500,
 	});
 
 	readRequests.add(1, { endpoint });
-	readSuccessRate.add(ok, { endpoint });
-	successRate.add(ok, { operation: 'read' });
+	readSuccessRate.add(expectedStatus, { endpoint });
+	successRate.add(expectedStatus, { operation: 'read' });
 	readLatency.add(res.timings.duration, { endpoint });
 
-	if (!ok) {
+	if (isProtectedStatus(res.status)) {
+		protectedRequests.add(1, { operation: 'read', endpoint });
+	}
+
+	if (!expectedStatus) {
 		failedRequests.add(1, { operation: 'read', endpoint });
-		console.error(`READ FAILED | endpoint=${endpoint} status=${res.status} body=${res.body}`);
+		console.error(`READ UNEXPECTED STATUS | endpoint=${endpoint} status=${res.status} body=${res.body}`);
 	}
 }
 
 function recordWrite(res) {
-	const ok = check(res, {
-		'transaction status is 201 or 202': (r) => r.status === 201 || r.status === 202,
+	const expectedStatus = isExpectedWriteStatus(res.status);
+	check(res, {
+		[`transaction status is ${formatStatusList(WRITE_EXPECTED_STATUSES)}`]: (r) =>
+			isExpectedWriteStatus(r.status),
 		'transaction response time < 2s': (r) => r.timings.duration < 2000,
 	});
 
 	writeRequests.add(1);
-	writeSuccessRate.add(ok);
-	successRate.add(ok, { operation: 'write' });
+	writeSuccessRate.add(expectedStatus);
+	successRate.add(expectedStatus, { operation: 'write' });
 	writeLatency.add(res.timings.duration);
 
-	if (!ok) {
+	if (isProtectedStatus(res.status)) {
+		protectedRequests.add(1, { operation: 'write' });
+	}
+
+	if (isBusinessRejectedStatus(res.status)) {
+		businessRejectedRequests.add(1);
+	}
+
+	if (!expectedStatus) {
 		failedRequests.add(1, { operation: 'write' });
-		console.error(`WRITE FAILED | status=${res.status} body=${res.body}`);
+		console.error(`WRITE UNEXPECTED STATUS | status=${res.status} body=${res.body}`);
 	}
 }
 
@@ -142,6 +171,7 @@ function getBalance() {
 	const res = http.get(`${BASE_URL}/api/v1/accounts/${accountID}/balance`, {
 		tags: { endpoint: 'balance_read' },
 		timeout: '5s',
+		responseCallback: readResponseCallback,
 	});
 
 	recordRead('balance', res);
@@ -152,6 +182,7 @@ function getTransactionStatus() {
 	const res = http.get(`${BASE_URL}/api/v1/transactions/${transactionID}/status`, {
 		tags: { endpoint: 'transaction_status_read' },
 		timeout: '5s',
+		responseCallback: readResponseCallback,
 	});
 
 	recordRead('transaction_status', res);
@@ -162,6 +193,7 @@ function createTransaction() {
 		headers: { 'Content-Type': 'application/json' },
 		tags: { endpoint: 'transaction_write' },
 		timeout: '5s',
+		responseCallback: writeResponseCallback,
 	});
 
 	recordWrite(res);

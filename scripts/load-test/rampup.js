@@ -1,6 +1,14 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
+import {
+	WRITE_EXPECTED_STATUSES,
+	formatStatusList,
+	isBusinessRejectedStatus,
+	isExpectedWriteStatus,
+	isProtectedStatus,
+	writeResponseCallback,
+} from './status.js';
 
 // =========================
 // Custom Metrics
@@ -8,6 +16,8 @@ import { Counter, Rate, Trend } from 'k6/metrics';
 export const successRate = new Rate('success_rate');
 export const failedRequests = new Counter('failed_requests');
 export const transactionLatency = new Trend('transaction_latency');
+export const protectedRequests = new Counter('protected_requests');
+export const businessRejectedRequests = new Counter('business_rejected_requests');
 
 const INITIAL_RATE = Number(__ENV.INITIAL_RATE || 500);
 const RATE_STEP = Number(__ENV.RATE_STEP || 10);
@@ -82,21 +92,31 @@ export default function () {
 	const params = {
 		headers: { 'Content-Type': 'application/json' },
 		timeout: '5s',
+		responseCallback: writeResponseCallback,
 	};
 
 	const res = http.post(`${BASE_URL}/api/v1/transactions`, payload, params);
 
-	const ok = check(res, {
-		'status is 201 or 202': (r) => r.status === 201 || r.status === 202,
+	const expectedStatus = isExpectedWriteStatus(res.status);
+	check(res, {
+		[`status is ${formatStatusList(WRITE_EXPECTED_STATUSES)}`]: (r) => isExpectedWriteStatus(r.status),
 		'response time < 2s': (r) => r.timings.duration < 2000,
 	});
 
-	successRate.add(ok);
+	successRate.add(expectedStatus);
 	transactionLatency.add(res.timings.duration);
 
-	if (!ok) {
+	if (isProtectedStatus(res.status)) {
+		protectedRequests.add(1);
+	}
+
+	if (isBusinessRejectedStatus(res.status)) {
+		businessRejectedRequests.add(1);
+	}
+
+	if (!expectedStatus) {
 		failedRequests.add(1);
-		console.error(`FAILED | status=${res.status} body=${res.body}`);
+		console.error(`UNEXPECTED STATUS | status=${res.status} body=${res.body}`);
 	}
 
 	sleep(Math.random() * 0.1);
