@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: banking-app
+  namespace: banking
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: banking-app
+
+  template:
+    metadata:
+      labels:
+        app: banking-app
+
+    spec:
+      containers:
+        - name: banking-app
+          image: ghcr.io/ahargunyllib/banking-peak-load-prototype:latest
+          imagePullPolicy: Always
+
+          ports:
+            - containerPort: 8080
+              name: http
+
+          envFrom:
+            - configMapRef:
+                name: banking-config
+
+            - secretRef:
+                name: banking-secret
+
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+
+            limits:
+              cpu: 1
+              memory: 1Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: banking-app
+  namespace: banking
+spec:
+  type: NodePort
+
+  selector:
+    app: banking-app
+
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      nodePort: 30080
