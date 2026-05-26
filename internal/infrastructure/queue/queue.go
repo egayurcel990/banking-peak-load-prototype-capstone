@@ -112,9 +112,9 @@ func (c *Client) QueueDepth(queueName string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("open inspect channel: %w", err)
 	}
-	defer ch.Close()
+	defer func() { _ = ch.Close() }()
 
-	state, err := ch.QueueInspect(queueName)
+	state, err := ch.QueueDeclarePassive(queueName, true, false, false, false, nil)
 	if err != nil {
 		return 0, fmt.Errorf("inspect queue %q: %w", queueName, err)
 	}
